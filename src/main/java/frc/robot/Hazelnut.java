@@ -7,12 +7,9 @@ import edu.wpi.first.wpilibj.GenericHID.Hand;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.drive.DifferentialDrive;
 import com.ctre.phoenix.motorcontrol.can.WPI_TalonSRX;
-import edu.wpi.first.wpilibj.Ultrasonic;
-import edu.wpi.first.wpilibj.CameraServer;
+import edu.wpi.first.cameraserver.CameraServer;
 import edu.wpi.first.wpilibj.Encoder;
 import frc.robot.Ultrasonic2537; 
-
-import edu.wpi.first.wpilibj.livewindow.LiveWindow;
 
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
@@ -30,16 +27,32 @@ public class Hazelnut extends  TimedRobot {
   private static final String kCustomAuto = "My Auto";
   private String m_autoSelected;
   private final SendableChooser<String> m_chooser = new SendableChooser<>();
+
   private XboxController xbox;
+
   private Timer timer;
+
   private WPI_TalonSRX m_rearLeft;
   private WPI_TalonSRX m_rearRight;
   private DifferentialDrive m_drive;
-  private boolean    f_safetyStop;
+  private final int LEFT_REAR_MOTOR = 0;
+  private final int RIGHT_REAR_MOTOR = 1;
+
   private Ultrasonic2537 f_ultrasonic;
   private Ultrasonic2537 b_ultrasonic;
+  private final int F_ULTRA_PING = 1;
+  private final int F_ULTRA_ECHO = 0;
+  private final int B_ULTRA_PING = 9;
+  private final int B_ULTRA_ECHO = 8;
+  private final double SAFE_DISTANCE = 15.0;
+
   private Encoder l_encoder;  
   private Encoder r_encoder; 
+  private final int L_ENCODER_A = 3;
+  private final int L_ENCODER_B = 4;
+  private final int R_ENCODER_A = 5;
+  private final int R_ENCODER_B = 6;
+
   /**
    * This function is run when the robot is first started up and should be
    * used for any initialization code.
@@ -47,27 +60,28 @@ public class Hazelnut extends  TimedRobot {
   @Override
   public void robotInit() {
     // initialize the objects and connect them to their underlying hardware
-    m_chooser.addDefault("Default Auto", kDefaultAuto);
-    m_chooser.addObject("My Auto", kCustomAuto);
+    m_chooser.setDefaultOption("Default Auto", kDefaultAuto);
+    m_chooser.addOption("My Auto", kCustomAuto);
     SmartDashboard.putData("Auto choices", m_chooser);
 
     xbox = new XboxController(0);
 
     timer = new Timer();
 
-    m_rearLeft = new WPI_TalonSRX(0);
-    m_rearRight = new WPI_TalonSRX(1);
+    m_rearLeft = new WPI_TalonSRX(LEFT_REAR_MOTOR);
+    m_rearRight = new WPI_TalonSRX(RIGHT_REAR_MOTOR);
     m_drive = new DifferentialDrive(m_rearLeft, m_rearRight);
 
-    f_ultrasonic = new Ultrasonic2537(1,0); // ping, echo
-    b_ultrasonic = new Ultrasonic2537 (9,8); 
-    f_ultrasonic.setAutomaticMode(true);
+    f_ultrasonic = new Ultrasonic2537(F_ULTRA_PING, F_ULTRA_ECHO); // ping, echo
+    b_ultrasonic = new Ultrasonic2537 (B_ULTRA_PING, B_ULTRA_ECHO); 
     f_ultrasonic.setEnabled(true);
+    b_ultrasonic.setEnabled(true);
+    f_ultrasonic.setAutomaticMode(true);
  
     CameraServer.getInstance().startAutomaticCapture();
 
-    r_encoder = new Encoder(3,4);
-    l_encoder = new Encoder(5,6, true); 
+    r_encoder = new Encoder(R_ENCODER_A, R_ENCODER_B);
+    l_encoder = new Encoder(L_ENCODER_A, L_ENCODER_B, true); 
 }
 
   /**
@@ -95,19 +109,16 @@ public class Hazelnut extends  TimedRobot {
    */
   @Override
   public void autonomousInit() {
-    l_encoder.reset(); 
-    r_encoder.reset(); 
     m_autoSelected = m_chooser.getSelected();
-    // autoSelected = SmartDashboard.getString("Auto Selector",
-    // defaultAuto);
-    System.out.println("Auto selected: " + m_autoSelected);
+    
     timer.reset();
     timer.start();
+    l_encoder.reset(); 
+    r_encoder.reset(); 
   }
 
-  /*public void teleopInit() {
-
-  }*/
+  public void teleopInit() {
+  }
 
   /**
    * This function is called periodically during autonomous.
@@ -124,6 +135,7 @@ public class Hazelnut extends  TimedRobot {
     }
     System.out.println("Left" + l_encoder.getRaw()); 
     System.out.println("Right" + r_encoder.getRaw()); 
+ 
     switch (m_autoSelected) {
       case kCustomAuto:
         // Put custom auto code here
@@ -136,41 +148,37 @@ public class Hazelnut extends  TimedRobot {
   }
 
   /**
-   * This function is called periodically during operator control.
+   * This function is called periodically during operator control. Drive robot using xbox controller joysticks
+   * but stop if you get too close to an obstacle.
    */
   @Override
   public void teleopPeriodic() {
 
-    // Use front-mounted ultrasonic sensor to stop robot
-    // if it gets too close to an obstacle
-    
-    
-
-    // Use controller joysticks to set drive speed, but
-    // safety stop if too close to an obstacle
+    // set speed from joystick y values
     double leftSpeed  = -0.5*xbox.getY(Hand.kLeft);
     double rightSpeed = -0.5*xbox.getY(Hand.kRight);
 
-    // If there's an obstacle in front of us, don't
-    // allow any more forward motion
-    if (safetyStop(f_ultrasonic, 15.0) && 
-        (leftSpeed > 0.0) && (rightSpeed > 0.0)) {
+    // Stop if there's an obstacle in front of us and we are driving forward
+    if (safetyStop(f_ultrasonic, SAFE_DISTANCE) && (leftSpeed > 0.0) && (rightSpeed > 0.0)) {
        m_drive.stopMotor();
-    } else if (safetyStop(b_ultrasonic, 15.0) && (leftSpeed < 0.0) && (rightSpeed < 0.0)) {
+    }  // Stop if there's an obstacle in back of us and we are driving backward
+    else if (safetyStop(b_ultrasonic, SAFE_DISTANCE) && (leftSpeed < 0.0) && (rightSpeed < 0.0)) {
        m_drive.stopMotor();
-    } else {
+    } 
+    else {
       // otherwise, set motors according to joysticks
        m_drive.tankDrive(leftSpeed, rightSpeed);
     }
-    //Timer.delay(0.01);
   }
 
+    /**
+   * This function is called to see if it's safe to continue driving forward or backward
+   */
 public boolean safetyStop(Ultrasonic2537 sensor, double distance){
   double f_range = sensor.getRangeInches();
   if (f_range < distance){
     return true; 
   }
-
   else {
     return false; 
   }
